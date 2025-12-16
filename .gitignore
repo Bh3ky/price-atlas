@@ -1,0 +1,110 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# ===============================
+# macOS system files
+# ===============================
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+
+# ===============================
+# Python
+# ===============================
+*$py.class
+
+
+# ===============================
+# Virtual environments
+# ===============================
+venv/
+env/
+.venv/
+ENV/
+
+
+# ===============================
+# VS Code
+# ===============================
+.vscode/
+
+
+# ===============================
+# Jupyter (if used)
+# ===============================
+.ipynb_checkpoints/
+
+
+# ===============================
+# Web scraping outputs
+# ===============================
+# Raw scraped data
+data/
+scraped_data/
+downloads/
+output/
+
+# Common scraped file formats
+*.html
+*.json
+*.csv
+*.xml
+*.xlsx
+*.parquet
+
+
+# ===============================
+# Logs & debug files
+# ===============================
+logs/
+*.log
+
+
+# ===============================
+# Environment variables & secrets
+# ===============================
+.env
+.env.*
+*.key
+*.pem
+
+
+# ===============================
+# Cache & temp files
+# ===============================
+.cache/
+.tmp/
+*.tmp
+*.bak
+
+
+# ===============================
+# Browser automation (Playwright / Selenium)
+# ===============================
+playwright-report/
+.selenium/
+.chromedriver*
+.geckodriver*
+ms-playwright/
+
+
+# ===============================
+# Requests / HTTP cache
+# ===============================
+.http_cache/
+
+
+/application_flow-diagram.md
