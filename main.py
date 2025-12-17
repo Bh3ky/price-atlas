@@ -12,7 +12,7 @@ from state import get_selected_asin
 
 def main():
     st.set_page_config(
-        page_title="Amazon Competitor Analysis",
+        page_title="price-atlas competitor analysis",
         page_icon="🫟",
         layout="wide",
     )
