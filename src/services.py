@@ -6,6 +6,8 @@ import time
 def scrape_and_store_product(asin, geo_location, domain):
     try:
         data = scrape_product_details(asin, geo_location, domain)
+        # Helpful for downstream filtering / analytics
+        data.setdefault("source", "target")
         # Ensure we have a sortable, numeric timestamp for UI ordering.
         # This is intentionally separate from DB-level created_at (which is an ISO string).
         data.setdefault("scraped_at", time.time())
@@ -62,6 +64,9 @@ def fetch_and_store_competitors(parent_asin, domain, geo_location, pages=2):
     stored_comps = []
     for comp in product_details:
         comp["parent_asin"] = parent_asin
+        comp.setdefault("source", "competitor")
+        # Timestamp snapshot so we can build price trends over time.
+        comp.setdefault("scraped_at", time.time())
         db.insert_product(comp)
         stored_comps.append(comp)
 
