@@ -2,6 +2,7 @@ import streamlit as st
 from src.llm import analyze_competitors
 from src.services import scrape_and_store_product, fetch_and_store_competitors
 from src.db import Database
+from datetime import datetime
 
 
 def render_header():
@@ -11,14 +12,18 @@ def render_header():
 
 def render_inputs():
     asin = st.text_input("ASIN", placeholder="e.g., BOVK234XYZ")
-    geo = st.text_input("Zip/Postal Code", placeholder="e.g., US, UK, DE")
-    domain = st.selectbox("Domain", [
-        "com", "us", "ca", "co.uk", "de", "za", "fr", "it", "ae"
-    ])
+    geo = st.text_input(
+        "Zip/Postal Code",
+        placeholder="e.g., 10001, United States, US, UK, DE",
+    )
+    domain = st.selectbox(
+        "Domain",
+        ["com", "ca", "co.uk", "de", "za", "fr", "it", "ae"],
+    )
     return asin.strip(), geo.strip(), domain
 
 
-def render_product_card(product):
+def render_product_card(product, idx=0):
     with st.container(border=True):
         cols = st.columns([1, 2])
 
@@ -29,7 +34,7 @@ def render_product_card(product):
             else:
                 cols[0].write("No image found.")
 
-        except:
+        except Exception:
             cols[0].write("Error loading images")
 
         with cols[1]:
@@ -46,8 +51,31 @@ def render_product_card(product):
             st.caption(f"Domain: {domain_info} | Geo Location: {geo_info}")
 
             st.write(product.get("url", ""))
-            if st.button("Start analyzing competitors", key=f"analyze_{product['asin']}"):
+            # Make button keys unique 
+            # Include both the ASIN and the stable index coming from the paginated loop
+            if st.button("Start analyzing competitors", key=f"analyze_{product['asin']}_{idx}"):
                 st.session_state["analyzing_asin"] = product["asin"]
+
+def _parse_created_at_iso(created_at: str) -> float:
+    """Best-effort parse of legacy DB records that only have created_at."""
+    try:
+        return datetime.fromisoformat(created_at).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _product_sort_ts(p: dict) -> float:
+    """
+    Sorting uses scraped_at when available.
+    Fallback to created_at (legacy records) so older rows still sort sensibly.
+    """
+    ts = p.get("scraped_at")
+    if isinstance(ts, (int, float)):
+        return float(ts)
+    created_at = p.get("created_at")
+    if isinstance(created_at, str) and created_at:
+        return _parse_created_at_iso(created_at)
+    return 0.0
 
 
 def main():
@@ -56,30 +84,71 @@ def main():
     asin, geo, domain = render_inputs()
 
     if st.button("Scrape Product") and asin:
-        with st.spinner("Scraping product..."):
-            scrape_and_store_product(asin, geo, domain)
-        st.success("Product scraped successifully")
+        # Quick client-side validation: ASINs are typically 10 alphanumeric characters
+        if not (len(asin) == 10 and asin.isalnum()):
+            st.error("Invalid ASIN. Please enter a 10-character alphanumeric ASIN.")
+        else:
+            with st.spinner("Scraping product..."):
+                data = scrape_and_store_product(asin, geo, domain)
+            if data:
+                # Auto-reset pagination so the newly scraped product appears immediately on page 1
+                st.session_state["products_page"] = 1
+                st.success("Product scraped successfully")
+            else:
+                st.warning("Scrape failed; nothing was stored. See the error above for details.")
 
     db = Database()
     products = db.get_all_products()
+
+    items_per_page = 10
+
+    # Optional sort toggle: allow switching between latest-first and oldest-first.
+    # We store the choice in session_state so it persists across reruns.
+    sort_choice = st.radio(
+        "Sort order",
+        options=["Latest first", "Oldest first"],
+        horizontal=True,
+        key="products_sort_order",
+    )
+    latest_first = sort_choice == "Latest first"
+
+    # Ensure the most recently scraped products appear first (page 1).
+    products = sorted(products, key=_product_sort_ts, reverse=latest_first)
+
     if products:
         st.divider()
         st.subheader("Product Scraped")
 
-        items_per_page = 10
         total_pages = (len(products) + items_per_page - 1) // items_per_page
 
-        col1, col2, col2 = st.columns([2, 3, 2])
-        with col2:
-            page = st.number_input("Page", min_value=1, max_value=total_pages, value=1) -1
+        # Pagination should be stateful and robust when list size / sort order changes.
+        if "products_page" not in st.session_state:
+            st.session_state["products_page"] = 1
+        st.session_state["products_page"] = int(
+            max(1, min(total_pages, st.session_state["products_page"]))
+        )
 
-        start_idx = page * items_per_page
+        col_left, col_mid, col_right = st.columns([2, 3, 2])
+        with col_mid:
+            page_num = st.number_input(
+                "Page",
+                min_value=1,
+                max_value=total_pages,
+                value=int(st.session_state["products_page"]),
+                step=1,
+                key="products_page",
+            )
+        page_idx = int(page_num) - 1
+
+        start_idx = page_idx * items_per_page
         end_idx = min(start_idx + items_per_page, len(products))
 
         st.write(f"Showing {start_idx + 1} - {end_idx} of {len(products)} products")
 
-        for p in products[start_idx:end_idx]:
-            render_product_card(p)
+        # Important: pass a stable index derived from the paginated slice so per-card
+        # widgets (buttons) get unique keys across pages.
+        for global_idx, p in enumerate(products[start_idx:end_idx], start=start_idx):
+            render_product_card(p, global_idx)
 
     selected_asin = st.session_state.get("analyzing_asin")
     if selected_asin:
@@ -99,7 +168,7 @@ def main():
 
     col1, col2 = st.columns([3, 1])
     with col2:
-        if st.button("Refresh Competitos"):
+        if st.button("Refresh Competitors"):
             with st.spinner("Refreshing..."):
                 comps = fetch_and_store_competitors(selected_asin, domain, geo)
             st.success(f"Refreshed {len(comps)} competitors")

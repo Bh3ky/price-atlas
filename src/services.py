@@ -1,12 +1,22 @@
 import streamlit as st
 from src.db import Database
 from src.oxylabs_client import scrape_product_details, search_competitors, scrap_multiple_products
+import time
 
 def scrape_and_store_product(asin, geo_location, domain):
-    data = scrape_product_details(asin, geo_location, domain)
-    db = Database()
-    db.insert_product(data)
-    return data
+    try:
+        data = scrape_product_details(asin, geo_location, domain)
+        # Ensure we have a sortable, numeric timestamp for UI ordering.
+        # This is intentionally separate from DB-level created_at (which is an ISO string).
+        data.setdefault("scraped_at", time.time())
+        db = Database()
+        db.insert_product(data)
+        return data
+    except Exception as e:
+        # Streamlit-friendly error. The underlying Oxylabs client now includes response
+        # details in the exception message, which makes 400s debuggable.
+        st.error(f"Failed to scrape product {asin}: {e}")
+        return None
 
 
 def fetch_and_store_competitors(parent_asin, domain, geo_location, pages=2):

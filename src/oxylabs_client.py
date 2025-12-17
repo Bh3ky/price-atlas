@@ -9,13 +9,111 @@ load_dotenv()
 
 OXYLABS_BASE_URL = "https://realtime.oxylabs.io/v1/queries"
 
+_GEO_ALIASES = {
+    # Common user inputs -> best-effort country names
+    "us": "United States",
+    "usa": "United States",
+    "uk": "United Kingdom",
+    "gb": "United Kingdom",
+    "de": "Germany",
+    "fr": "France",
+    "it": "Italy",
+    "es": "Spain",
+    "ca": "Canada",
+    "ae": "United Arab Emirates",
+    "za": "South Africa",
+}
+
+
+def normalize_geo_location(geo_location: str) -> str | None:
+    """
+    Oxylabs `geo_location` may reject empty/unknown values (causing 400).
+    Users may enter zip codes, city names, or country codes; we normalize common codes.
+    """
+    if geo_location is None:
+        return None
+    s = str(geo_location).strip()
+    if not s:
+        return None
+    return _GEO_ALIASES.get(s.lower(), s)
+
+
+def normalize_domain(domain: str) -> str:
+    """
+    Oxylabs expects Amazon domains like 'com', 'co.uk', etc.
+    The UI previously allowed 'us'; map it to 'com' to avoid 400s.
+    """
+    d = str(domain or "").strip().lower()
+    return "com" if d == "us" else d
+
+
+def _compact_payload(payload: dict) -> dict:
+    """Remove empty-string / None values to avoid sending invalid parameters."""
+    compact = {}
+    for k, v in (payload or {}).items():
+        if v is None:
+            continue
+        if isinstance(v, str) and not v.strip():
+            continue
+        compact[k] = v
+    return compact
+
+
+def _format_http_error(err: requests.exceptions.HTTPError, payload: dict) -> str:
+    """
+    Requests' HTTPError message doesn't include the response body by default.
+    Oxylabs often explains *exactly* what's wrong in the JSON response—surface it.
+    """
+    resp = err.response
+    status = getattr(resp, "status_code", "unknown")
+    url = getattr(resp, "url", "")
+    body = ""
+    try:
+        body = json.dumps(resp.json(), indent=2)[:4000]
+    except Exception:
+        try:
+            body = (resp.text or "")[:4000]
+        except Exception:
+            body = ""
+
+    payload_summary = {
+        # Safe subset (no secrets)
+        "source": payload.get("source"),
+        "query": payload.get("query"),
+        "domain": payload.get("domain"),
+        "geo_location": payload.get("geo_location"),
+        "page": payload.get("page"),
+        "sort_by": payload.get("sort_by"),
+        "parse": payload.get("parse"),
+        "refinements": payload.get("refinements"),
+    }
+    return (
+        f"Oxylabs request failed ({status}) {url}\n"
+        f"Payload: {json.dumps(payload_summary, ensure_ascii=False)}\n"
+        f"Response: {body}"
+    )
+
 
 def post_query(payload):
     username = os.getenv("OXYLABS_USERNAME")
     password = os.getenv("OXYLABS_PASSWORD")
 
-    response = requests.post(OXYLABS_BASE_URL, auth=(username, password), json=payload)
-    response.raise_for_status()
+    if not username or not password:
+        raise ValueError(
+            "Missing Oxylabs credentials. Set OXYLABS_USERNAME and OXYLABS_PASSWORD in your environment (.env)."
+        )
+
+    payload = _compact_payload(payload)
+    try:
+        response = requests.post(
+            OXYLABS_BASE_URL,
+            auth=(username, password),
+            json=payload,
+            timeout=60,
+        )
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        raise ValueError(_format_http_error(e, payload)) from e
     response_json = response.json()
 
     return response_json
@@ -56,6 +154,8 @@ def normalize_product(content):
 
 
 def scrape_product_details(asin, geo_location, domain):
+    domain = normalize_domain(domain)
+    geo_location = normalize_geo_location(geo_location)
     payload = {
         "source": "amazon_product",
         "query": asin,
@@ -71,7 +171,7 @@ def scrape_product_details(asin, geo_location, domain):
         normalized["asin"] = asin
 
     normalized["amazon_domain"] = domain
-    normalized["geo_location"] = geo_location
+    normalized["geo_location"] = geo_location or ""
     return normalized
 
 
@@ -120,6 +220,8 @@ def normalize_search_result(item):
 def search_competitors(query_title, domain, categories, pages=1, geo_location=""):
     st.write("🔎 Searching for competitors")
 
+    domain = normalize_domain(domain)
+    geo_location = normalize_geo_location(geo_location) or ""
     search_title = clean_product_name(query_title)
     results = []
     seen_asins = set()
