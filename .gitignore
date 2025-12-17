@@ -108,3 +108,6 @@ ms-playwright/
 
 
 /application_flow-diagram.md
+
+# streamlit
+.streamlit/
